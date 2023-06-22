@@ -48,7 +48,7 @@ function annotateTestResult(testResult, token, headSha, annotateOnly, updateChec
         const foundResults = testResult.totalCount > 0 || testResult.skipped > 0;
         let title = 'No test results found!';
         if (foundResults) {
-            title = `${testResult.totalCount} tests run, ${testResult.passed} passed, ${testResult.skipped} skipped, ${testResult.failed} failed.`;
+            title = `${testResult.totalCount} tests run, ${testResult.passed} passed, ${testResult.skipped} skipped, ${testResult.failed} failed, ${testResult.retried} retried.`;
         }
         core.info(`ℹ️ - ${testResult.checkName} - ${title}`);
         const conclusion = testResult.failed <= 0 ? 'success' : 'failure';
@@ -116,7 +116,8 @@ function attachSummary(testResults, detailedSummary, includePassed) {
                 { data: 'Tests', header: true },
                 { data: 'Passed ✅', header: true },
                 { data: 'Skipped ↪️', header: true },
-                { data: 'Failed ❌', header: true }
+                { data: 'Failed ❌', header: true },
+                { data: 'Retried ⚠️', header: true }
             ]
         ];
         const detailsTable = [
@@ -132,7 +133,8 @@ function attachSummary(testResults, detailedSummary, includePassed) {
                 `${testResult.totalCount} ran`,
                 `${testResult.passed} passed`,
                 `${testResult.skipped} skipped`,
-                `${testResult.failed} failed`
+                `${testResult.failed} failed`,
+                `${testResult.retried} retried`
             ]);
             if (detailedSummary) {
                 const annotations = testResult.annotations.filter(annotation => includePassed || annotation.annotation_level !== 'notice');
@@ -253,6 +255,7 @@ function run() {
                 skipped: 0,
                 failed: 0,
                 passed: 0,
+                retried: 0,
                 annotations: []
             };
             core.info(`Retrieved ${reportsCount} reports to process.`);
@@ -262,12 +265,14 @@ function run() {
                 mergedResult.skipped += testResult.skipped;
                 mergedResult.failed += testResult.failed;
                 mergedResult.passed += testResult.passed;
+                mergedResult.retried += testResult.retried;
                 testResults.push(testResult);
             }
             core.setOutput('total', mergedResult.totalCount);
             core.setOutput('passed', mergedResult.passed);
             core.setOutput('skipped', mergedResult.skipped);
             core.setOutput('failed', mergedResult.failed);
+            core.setOutput('retried', mergedResult.retried);
             if (!(mergedResult.totalCount > 0 || mergedResult.skipped > 0) && requireTests) {
                 core.setFailed(`❌ No test results found for ${checkName}`);
                 return; // end if we failed due to no tests, but configured to require tests
@@ -494,9 +499,10 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
     return __awaiter(this, void 0, void 0, function* () {
         let totalCount = 0;
         let skipped = 0;
+        let retried = 0;
         const annotations = [];
         if (!suite.testsuite && !suite.testsuites) {
-            return { totalCount, skipped, annotations };
+            return { totalCount, skipped, retried, annotations };
         }
         const testsuites = suite.testsuite
             ? Array.isArray(suite.testsuite)
@@ -507,7 +513,7 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
                 : [suite.testsuites.testsuite];
         for (const testsuite of testsuites) {
             if (!testsuite) {
-                return { totalCount, skipped, annotations };
+                return { totalCount, skipped, retried, annotations };
             }
             let suiteName = '';
             if (suiteRegex) {
@@ -524,6 +530,7 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
             const res = yield parseSuite(testsuite, suiteName, suiteRegex, annotatePassed, checkRetries, excludeSources, checkTitleTemplate, testFilesPrefix, transformer, followSymlink, annotationsLimit);
             totalCount += res.totalCount;
             skipped += res.skipped;
+            retried += res.retried;
             annotations.push(...res.annotations);
             if (!testsuite.testcase) {
                 continue;
@@ -531,7 +538,7 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
             else if (annotationsLimit > 0) {
                 const count = annotations.filter(a => a.annotation_level === 'failure' || annotatePassed).length;
                 if (count >= annotationsLimit) {
-                    return { totalCount, skipped, annotations };
+                    return { totalCount, skipped, retried, annotations };
                 }
             }
             let testcases = Array.isArray(testsuite.testcase)
@@ -539,6 +546,23 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
                 : testsuite.testcase
                     ? [testsuite.testcase]
                     : [];
+            // count the number of retried tests
+            const testcaseRetryCount = new Map();
+            for (const testcase of testcases) {
+                const key = testcase._attributes.name;
+                const count = testcaseRetryCount.get(key);
+                if (count === undefined) {
+                    testcaseRetryCount.set(key, 1);
+                }
+                else {
+                    testcaseRetryCount.set(key, count + 1);
+                }
+            }
+            for (const count of testcaseRetryCount.values()) {
+                if (count > 1) {
+                    retried++;
+                }
+            }
             if (checkRetries) {
                 // identify duplicates, in case of flaky tests, and remove them
                 const testcaseMap = new Map();
@@ -641,12 +665,12 @@ suite, parentName, suiteRegex, annotatePassed = false, checkRetries = false, exc
                 if (annotationsLimit > 0) {
                     const count = annotations.filter(a => a.annotation_level === 'failure' || annotatePassed).length;
                     if (count >= annotationsLimit) {
-                        return { totalCount, skipped, annotations };
+                        return { totalCount, skipped, retried, annotations };
                     }
                 }
             }
         }
-        return { totalCount, skipped, annotations };
+        return { totalCount, skipped, retried, annotations };
     });
 }
 /**
@@ -664,17 +688,19 @@ function parseTestReports(checkName, summary, reportPaths, suiteRegex, annotateP
         let annotations = [];
         let totalCount = 0;
         let skipped = 0;
+        let retried = 0;
         try {
             for (var _d = true, _e = __asyncValues(globber.globGenerator()), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
                 _c = _f.value;
                 _d = false;
                 const file = _c;
                 core.debug(`Parsing report file: ${file}`);
-                const { totalCount: c, skipped: s, annotations: a } = yield parseFile(file, suiteRegex, annotatePassed, checkRetries, excludeSources, checkTitleTemplate, testFilesPrefix, transformer, followSymlink, annotationsLimit);
+                const { totalCount: c, skipped: s, retried: r, annotations: a } = yield parseFile(file, suiteRegex, annotatePassed, checkRetries, excludeSources, checkTitleTemplate, testFilesPrefix, transformer, followSymlink, annotationsLimit);
                 if (c === 0)
                     continue;
                 totalCount += c;
                 skipped += s;
+                retried += r;
                 annotations = annotations.concat(a);
                 if (annotationsLimit > 0) {
                     const count = annotations.filter(an => an.annotation_level === 'failure' || annotatePassed).length;
@@ -701,6 +727,7 @@ function parseTestReports(checkName, summary, reportPaths, suiteRegex, annotateP
             skipped,
             failed,
             passed,
+            retried,
             annotations
         };
     });

@@ -8,6 +8,7 @@ import {applyTransformer} from './utils'
 interface InternalTestResult {
   totalCount: number
   skipped: number
+  retried: number
   annotations: Annotation[]
 }
 
@@ -18,6 +19,7 @@ export interface TestResult {
   skipped: number
   failed: number
   passed: number
+  retried: number
   annotations: Annotation[]
 }
 
@@ -187,10 +189,11 @@ async function parseSuite(
 ): Promise<InternalTestResult> {
   let totalCount = 0
   let skipped = 0
+  let retried = 0
   const annotations: Annotation[] = []
 
   if (!suite.testsuite && !suite.testsuites) {
-    return {totalCount, skipped, annotations}
+    return {totalCount, skipped, retried, annotations}
   }
 
   const testsuites = suite.testsuite
@@ -203,7 +206,7 @@ async function parseSuite(
 
   for (const testsuite of testsuites) {
     if (!testsuite) {
-      return {totalCount, skipped, annotations}
+      return {totalCount, skipped, retried, annotations}
     }
 
     let suiteName = ''
@@ -233,6 +236,7 @@ async function parseSuite(
     )
     totalCount += res.totalCount
     skipped += res.skipped
+    retried += res.retried
     annotations.push(...res.annotations)
 
     if (!testsuite.testcase) {
@@ -240,7 +244,7 @@ async function parseSuite(
     } else if (annotationsLimit > 0) {
       const count = annotations.filter(a => a.annotation_level === 'failure' || annotatePassed).length
       if (count >= annotationsLimit) {
-        return {totalCount, skipped, annotations}
+        return {totalCount, skipped, retried, annotations}
       }
     }
 
@@ -249,6 +253,23 @@ async function parseSuite(
       : testsuite.testcase
       ? [testsuite.testcase]
       : []
+
+    // count the number of retried tests
+    const testcaseRetryCount = new Map<string, number>()
+    for (const testcase of testcases) {
+      const key = testcase._attributes.name
+      const count = testcaseRetryCount.get(key)
+      if (count === undefined) {
+        testcaseRetryCount.set(key, 1)
+      } else {
+        testcaseRetryCount.set(key, count + 1)
+      }
+    }
+    for (const count of testcaseRetryCount.values()) {
+      if (count > 1) {
+        retried++
+      }
+    }
 
     if (checkRetries) {
       // identify duplicates, in case of flaky tests, and remove them
@@ -373,12 +394,12 @@ async function parseSuite(
       if (annotationsLimit > 0) {
         const count = annotations.filter(a => a.annotation_level === 'failure' || annotatePassed).length
         if (count >= annotationsLimit) {
-          return {totalCount, skipped, annotations}
+          return {totalCount, skipped, retried, annotations}
         }
       }
     }
   }
-  return {totalCount, skipped, annotations}
+  return {totalCount, skipped, retried, annotations}
 }
 
 /**
@@ -407,12 +428,14 @@ export async function parseTestReports(
   let annotations: Annotation[] = []
   let totalCount = 0
   let skipped = 0
+  let retried = 0
   for await (const file of globber.globGenerator()) {
     core.debug(`Parsing report file: ${file}`)
 
     const {
       totalCount: c,
       skipped: s,
+      retried: r,
       annotations: a
     } = await parseFile(
       file,
@@ -429,6 +452,7 @@ export async function parseTestReports(
     if (c === 0) continue
     totalCount += c
     skipped += s
+    retried += r
     annotations = annotations.concat(a)
 
     if (annotationsLimit > 0) {
@@ -450,6 +474,7 @@ export async function parseTestReports(
     skipped,
     failed,
     passed,
+    retried,
     annotations
   }
 }

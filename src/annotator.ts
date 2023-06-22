@@ -19,7 +19,7 @@ export async function annotateTestResult(
 
   let title = 'No test results found!'
   if (foundResults) {
-    title = `${testResult.totalCount} tests run, ${testResult.passed} passed, ${testResult.skipped} skipped, ${testResult.failed} failed.`
+    title = `${testResult.totalCount} tests run, ${testResult.passed} passed, ${testResult.skipped} skipped, ${testResult.failed} failed, ${testResult.retried} retried.`
   }
 
   core.info(`ℹ️ - ${testResult.checkName} - ${title}`)
@@ -114,7 +114,8 @@ export async function attachSummary(
       {data: 'Tests', header: true},
       {data: 'Passed ✅', header: true},
       {data: 'Skipped ↪️', header: true},
-      {data: 'Failed ❌', header: true}
+      {data: 'Failed ❌', header: true},
+      {data: 'Retried ⚠️', header: true}
     ]
   ]
 
@@ -132,7 +133,8 @@ export async function attachSummary(
       `${testResult.totalCount} ran`,
       `${testResult.passed} passed`,
       `${testResult.skipped} skipped`,
-      `${testResult.failed} failed`
+      `${testResult.failed} failed`,
+      `${testResult.retried} retried`
     ])
 
     if (detailedSummary) {

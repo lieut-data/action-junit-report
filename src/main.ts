@@ -55,6 +55,7 @@ export async function run(): Promise<void> {
       skipped: 0,
       failed: 0,
       passed: 0,
+      retried: 0,
       annotations: []
     }
 
@@ -80,6 +81,7 @@ export async function run(): Promise<void> {
       mergedResult.skipped += testResult.skipped
       mergedResult.failed += testResult.failed
       mergedResult.passed += testResult.passed
+      mergedResult.retried += testResult.retried
       testResults.push(testResult)
     }
 
@@ -87,6 +89,7 @@ export async function run(): Promise<void> {
     core.setOutput('passed', mergedResult.passed)
     core.setOutput('skipped', mergedResult.skipped)
     core.setOutput('failed', mergedResult.failed)
+    core.setOutput('retried', mergedResult.retried)
 
     if (!(mergedResult.totalCount > 0 || mergedResult.skipped > 0) && requireTests) {
       core.setFailed(`❌ No test results found for ${checkName}`)
