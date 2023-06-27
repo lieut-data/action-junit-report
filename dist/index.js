@@ -91,7 +91,8 @@ function annotateTestResult(testResult, token, headSha, annotateOnly, updateChec
                             annotations: sliced
                         } });
                     core.debug(JSON.stringify(updateCheckRequest, null, 2));
-                    yield octokit.rest.checks.update(updateCheckRequest);
+                    const updatedCheck = yield octokit.rest.checks.update(updateCheckRequest);
+                    return updatedCheck.data.html_url;
                 }
             }
             else {
@@ -102,13 +103,15 @@ function annotateTestResult(testResult, token, headSha, annotateOnly, updateChec
                     } });
                 core.debug(JSON.stringify(createCheckRequest, null, 2));
                 core.info(`ℹ️ - ${testResult.checkName} - Creating check for`);
-                yield octokit.rest.checks.create(createCheckRequest);
+                const createdCheck = yield octokit.rest.checks.create(createCheckRequest);
+                return createdCheck.data.html_url;
             }
         }
+        return null;
     });
 }
 exports.annotateTestResult = annotateTestResult;
-function attachSummary(testResults, detailedSummary, includePassed) {
+function attachSummary(testResults, checkURLs, detailedSummary, includePassed) {
     return __awaiter(this, void 0, void 0, function* () {
         const table = [
             [
@@ -158,6 +161,14 @@ function attachSummary(testResults, detailedSummary, includePassed) {
         yield core.summary.addTable(table).write();
         if (detailedSummary) {
             yield core.summary.addTable(detailsTable).write();
+        }
+        let index = 0;
+        for (const checkURL of checkURLs) {
+            yield core.summary.addLink('See detailed results', checkURL).write();
+            index++;
+            if (index > 0) {
+                yield core.summary.addBreak().write();
+            }
         }
     });
 }
@@ -288,9 +299,13 @@ function run() {
             core.info(`ℹ️ Posting with conclusion '${conclusion}' to ${link} (sha: ${headSha})`);
             core.endGroup();
             core.startGroup(`🚀 Publish results`);
+            const checkURLs = [];
             try {
                 for (const testResult of testResults) {
-                    yield (0, annotator_1.annotateTestResult)(testResult, token, headSha, annotateOnly, updateCheck, annotateNotice, jobName);
+                    const checkURL = yield (0, annotator_1.annotateTestResult)(testResult, token, headSha, annotateOnly, updateCheck, annotateNotice, jobName);
+                    if (checkURL !== null) {
+                        checkURLs.push(checkURL);
+                    }
                 }
             }
             catch (error) {
@@ -300,7 +315,7 @@ function run() {
             const supportsJobSummary = process.env['GITHUB_STEP_SUMMARY'];
             if (jobSummary && supportsJobSummary) {
                 try {
-                    yield (0, annotator_1.attachSummary)(testResults, detailedSummary, includePassed);
+                    yield (0, annotator_1.attachSummary)(testResults, checkURLs, detailedSummary, includePassed);
                 }
                 catch (error) {
                     core.error(`❌ Failed to set the summary using the provided token. (${error})`);

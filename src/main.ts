@@ -108,9 +108,21 @@ export async function run(): Promise<void> {
     core.endGroup()
     core.startGroup(`🚀 Publish results`)
 
+    const checkURLs: string[] = []
     try {
       for (const testResult of testResults) {
-        await annotateTestResult(testResult, token, headSha, annotateOnly, updateCheck, annotateNotice, jobName)
+        const checkURL = await annotateTestResult(
+          testResult,
+          token,
+          headSha,
+          annotateOnly,
+          updateCheck,
+          annotateNotice,
+          jobName
+        )
+        if (checkURL !== null) {
+          checkURLs.push(checkURL)
+        }
       }
     } catch (error) {
       core.error(`❌ Failed to create checks using the provided token. (${error})`)
@@ -122,7 +134,7 @@ export async function run(): Promise<void> {
     const supportsJobSummary = process.env['GITHUB_STEP_SUMMARY']
     if (jobSummary && supportsJobSummary) {
       try {
-        await attachSummary(testResults, detailedSummary, includePassed)
+        await attachSummary(testResults, checkURLs, detailedSummary, includePassed)
       } catch (error) {
         core.error(`❌ Failed to set the summary using the provided token. (${error})`)
       }

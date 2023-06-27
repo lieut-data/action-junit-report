@@ -11,7 +11,7 @@ export async function annotateTestResult(
   updateCheck: boolean,
   annotateNotice: boolean,
   jobName: string
-): Promise<void> {
+): Promise<string | null> {
   const annotations = testResult.annotations.filter(
     annotation => annotateNotice || annotation.annotation_level !== 'notice'
   )
@@ -79,7 +79,9 @@ export async function annotateTestResult(
 
         core.debug(JSON.stringify(updateCheckRequest, null, 2))
 
-        await octokit.rest.checks.update(updateCheckRequest)
+        const updatedCheck = await octokit.rest.checks.update(updateCheckRequest)
+
+        return updatedCheck.data.html_url
       }
     } else {
       const createCheckRequest = {
@@ -98,13 +100,18 @@ export async function annotateTestResult(
       core.debug(JSON.stringify(createCheckRequest, null, 2))
 
       core.info(`ℹ️ - ${testResult.checkName} - Creating check for`)
-      await octokit.rest.checks.create(createCheckRequest)
+      const createdCheck = await octokit.rest.checks.create(createCheckRequest)
+
+      return createdCheck.data.html_url
     }
   }
+
+  return null
 }
 
 export async function attachSummary(
   testResults: TestResult[],
+  checkURLs: string[],
   detailedSummary: boolean,
   includePassed: boolean
 ): Promise<void> {
@@ -164,5 +171,14 @@ export async function attachSummary(
   await core.summary.addTable(table).write()
   if (detailedSummary) {
     await core.summary.addTable(detailsTable).write()
+  }
+
+  let index = 0
+  for (const checkURL of checkURLs) {
+    await core.summary.addLink('See detailed results', checkURL).write()
+    index++
+    if (index > 0) {
+      await core.summary.addBreak().write()
+    }
   }
 }
